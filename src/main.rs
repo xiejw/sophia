@@ -21,13 +21,13 @@ pub mod alg {
     }
     impl Eq for Value {}
 
-    #[derive(Debug)]
+    #[derive(Debug, Hash, Eq, PartialEq)]
     pub enum BinOpType {
         Add,
         Minus,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Hash, Eq, PartialEq)]
     pub enum Op {
         Inp(Rc<Value>),
         Read(Rc<Value>),
@@ -54,6 +54,39 @@ pub mod alg {
         }
     }
 
+    impl std::fmt::Display for Op {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            self.fmt_with_indent(f, 0)
+        }
+    }
+
+    impl Op {
+        fn fmt_with_indent(&self, f: &mut std::fmt::Formatter, indent: usize) -> std::fmt::Result {
+            match self {
+                Op::Inp(_) => {
+                    write!(f, "{:?}", self)
+                }
+                Op::Read(_) => {
+                    write!(f, "{:?}", self)
+                }
+                Op::Binary(btype, ref op1, ref op2) => {
+                    let space = format!("{:1$}", " ", indent);
+                    let new_indext = indent + 4;
+                    write!(
+                        f,
+                        "Binary(\n{}  +- {:?},\n{}  +- ", //{}\n {} +- {}\n{})",
+                        space, btype, space
+                    )
+                    .unwrap();
+                    op1.fmt_with_indent(f, new_indext).unwrap();
+                    write!(f, "\n{}  +- ", space).unwrap();
+                    op2.fmt_with_indent(f, new_indext).unwrap();
+                    write!(f, "\n{})", space)
+                }
+            }
+        }
+    }
+
     pub struct Ns {}
 
     impl Ns {
@@ -61,12 +94,19 @@ pub mod alg {
             Ns {}
         }
 
-        pub fn new_fn(self: &Self, name: &str) -> Fn {
+        pub fn new_fn(self: &mut Self, name: &str) -> Fn {
             Fn {
                 name: name.to_owned(),
                 inps: Vec::new(),
                 outs: Vec::new(),
             }
+        }
+
+        pub fn new_raw_param(self: &mut Self, name: &str) -> Rc<Value> {
+            Rc::new(Value {
+                name: name.to_owned(),
+                vtype: VType::Param,
+            })
         }
     }
 
@@ -137,19 +177,15 @@ pub mod alg {
             }
         }
     }
-
-    pub fn new_raw_param(name: &str) -> Rc<Value> {
-        Rc::new(Value {
-            name: name.to_owned(),
-            vtype: VType::Param,
-        })
-    }
 }
 
 pub mod cc {
     use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::rc::Rc;
 
     use crate::alg::Fn;
+    use crate::alg::Op;
 
     pub fn compile(f: &Fn) {
         // maintain a input sets
@@ -161,40 +197,56 @@ pub mod cc {
             index += 1;
         }
 
-        // needs a top sort
+        // topology sort
+        let mut ops = Vec::new();
+        for o in f.outs() {
+            ops.push(o);
+        }
 
-        // // maintain a stack to loop of all ops
-        // let mut ops = Vec::new();
-        // for o in f.outs() {
-        //     ops.push(o);
-        // }
+        let mut outs = Vec::new();
+        {
+            let mut states = HashSet::new();
+            top_sort(&mut ops, &mut outs, &mut states);
+        }
 
-        // loop {
-        //     if ops.len() == 0 {
-        //         println!("cc end");
-        //         break;
-        //     }
-        //     let o = ops.pop().unwrap();
-        // }
+        for o in &outs {
+            println!("op after sort {}", o);
+        }
+    }
 
-        //     match **o {
-        //         Op::Inp(ref inp) => {
-        //             if inps.contains(inp) {
-        //                 println!("found input {:?}", inp.name);
-        //             } else {
-        //                 panic!("unknown input {:?}", inp);
-        //             }
-        //         }
-        //         Op::Read(ref param) => {
-        //             println!("found param {:?}", param.name);
-        //         }
-        //         Op::Binary(_, ref arg1, ref arg2) => {
-        //             ops.push(arg2);
-        //             ops.push(arg1);
-        //         }
-        //     }
-        // }
-        //}
+    fn top_sort<'a>(
+        ops: &mut Vec<&'a Rc<Op>>,
+        outs: &mut Vec<&'a Rc<Op>>,
+        states: &mut HashSet<&'a Rc<Op>>,
+    ) {
+        if ops.len() == 0 {
+            return;
+        }
+
+        let o = ops.pop().unwrap(); // should always be safe
+
+        if states.contains(o) {
+            return;
+        }
+
+        match **o {
+            Op::Inp(_) => {
+                outs.push(o);
+                states.insert(o);
+            }
+            Op::Read(_) => {
+                outs.push(o);
+                states.insert(o);
+            }
+            Op::Binary(_, ref arg1, ref arg2) => {
+                ops.push(arg1);
+                top_sort(ops, outs, states);
+                ops.push(arg2);
+                top_sort(ops, outs, states);
+                outs.push(o);
+                states.insert(o);
+            }
+        };
     }
 }
 
@@ -202,8 +254,8 @@ use alg::Ns;
 use alg::Op;
 
 fn main() {
-    let root = Ns::new();
-    let w = alg::new_raw_param("w");
+    let mut root = Ns::new();
+    let w = root.new_raw_param("w");
 
     let mut f = root.new_fn("foo");
     let x = f.new_inp("x");
@@ -212,7 +264,7 @@ fn main() {
     let o = Op::minus(Op::minus(Op::inp(x.clone()), Op::inp(x)), Op::inp(y));
     let o = Op::add(o, Op::read(w));
 
-    println!("Op {:?}", &o);
+    println!("Op {}", &o);
     f.add_out(o);
 
     f.dump();
