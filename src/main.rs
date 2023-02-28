@@ -8,6 +8,7 @@ pub mod alg {
         Input,
     }
 
+    #[allow(clippy::derive_hash_xor_eq)]
     #[derive(Debug, Hash)]
     pub struct Value {
         name: String,
@@ -16,7 +17,7 @@ pub mod alg {
 
     impl PartialEq for Value {
         fn eq(&self, other: &Self) -> bool {
-            self as *const _ == other as *const _
+            std::ptr::eq(self, other)
         }
     }
     impl Eq for Value {}
@@ -45,6 +46,7 @@ pub mod alg {
             Rc::new(Op::Read(v))
         }
 
+        #[allow(clippy::should_implement_trait)]
         pub fn add(arg1: Rc<Op>, arg2: Rc<Op>) -> Rc<Op> {
             Rc::new(Op::Binary(BinOpType::Add, arg1, arg2))
         }
@@ -88,13 +90,18 @@ pub mod alg {
     }
 
     pub struct Ns {}
+    impl Default for Ns {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     impl Ns {
         pub fn new() -> Ns {
             Ns {}
         }
 
-        pub fn new_fn(self: &mut Self, name: &str) -> Fn {
+        pub fn new_fn(&mut self, name: &str) -> Fn {
             Fn {
                 name: name.to_owned(),
                 inps: Vec::new(),
@@ -102,7 +109,7 @@ pub mod alg {
             }
         }
 
-        pub fn new_raw_param(self: &mut Self, name: &str) -> Rc<Value> {
+        pub fn new_raw_param(&mut self, name: &str) -> Rc<Value> {
             Rc::new(Value {
                 name: name.to_owned(),
                 vtype: VType::Param,
@@ -117,15 +124,15 @@ pub mod alg {
     }
 
     impl Fn {
-        pub fn inps(self: &Self) -> &Vec<Rc<Value>> {
+        pub fn inps(&self) -> &Vec<Rc<Value>> {
             &self.inps
         }
 
-        pub fn outs(self: &Self) -> &Vec<Rc<Op>> {
+        pub fn outs(&self) -> &Vec<Rc<Op>> {
             &self.outs
         }
 
-        pub fn new_inp(self: &mut Self, name: &str) -> Rc<Value> {
+        pub fn new_inp(&mut self, name: &str) -> Rc<Value> {
             let v = Rc::new(Value {
                 name: format!("{}/{}", &self.name, name),
                 vtype: VType::Input,
@@ -134,11 +141,11 @@ pub mod alg {
             v
         }
 
-        pub fn add_out(self: &mut Self, v: Rc<Op>) {
+        pub fn add_out(&mut self, v: Rc<Op>) {
             self.outs.push(v);
         }
 
-        pub fn dump(self: &Self) {
+        pub fn dump(&self) {
             // maintain a input sets
             let mut inps = HashSet::new();
             for i in &self.inps {
@@ -152,7 +159,7 @@ pub mod alg {
             }
 
             loop {
-                if ops.len() == 0 {
+                if ops.is_empty() {
                     break;
                 }
 
@@ -197,6 +204,8 @@ pub mod cc {
             index += 1;
         }
 
+        println!("final index {}", index);
+
         // topology sort
         let mut ops = Vec::new();
         for o in f.outs() {
@@ -219,7 +228,7 @@ pub mod cc {
         outs: &mut Vec<&'a Rc<Op>>,
         states: &mut HashSet<&'a Rc<Op>>,
     ) {
-        if ops.len() == 0 {
+        if ops.is_empty() {
             return;
         }
 
