@@ -56,14 +56,27 @@ pub mod alg {
         }
     }
 
+    const SHIFT_WIDTH: usize = 4;
+    const MAX_SHIFT_WIDTH: usize = 12;
+
+    // The {:max_shift_width} controls the indention for the output.
     impl std::fmt::Display for Op {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            self.fmt_with_indent(f, 0)
+            if let Some(precision) = f.precision() {
+                self.fmt_with_indent(f, 0, precision)
+            } else {
+                self.fmt_with_indent(f, 0, MAX_SHIFT_WIDTH)
+            }
         }
     }
 
     impl Op {
-        fn fmt_with_indent(&self, f: &mut std::fmt::Formatter, indent: usize) -> std::fmt::Result {
+        fn fmt_with_indent(
+            &self,
+            f: &mut std::fmt::Formatter,
+            indent: usize,
+            max_indent_width: usize,
+        ) -> std::fmt::Result {
             match self {
                 Op::Inp(_) => {
                     write!(f, "{:?}", self)
@@ -73,17 +86,18 @@ pub mod alg {
                 }
                 Op::Binary(btype, ref op1, ref op2) => {
                     let space = format!("{:1$}", " ", indent);
-                    let new_indext = indent + 4;
-                    write!(
-                        f,
-                        "Binary(\n{}  +- {:?},\n{}  +- ", //{}\n {} +- {}\n{})",
-                        space, btype, space
-                    )
-                    .unwrap();
-                    op1.fmt_with_indent(f, new_indext).unwrap();
-                    write!(f, "\n{}  +- ", space).unwrap();
-                    op2.fmt_with_indent(f, new_indext).unwrap();
-                    write!(f, "\n{})", space)
+                    let new_indext = indent + SHIFT_WIDTH;
+                    if new_indext < max_indent_width {
+                        write!(f, "Binary(\n{}  /  {:?},\n{}  +- ", space, btype, space).unwrap();
+                        op1.fmt_with_indent(f, new_indext, max_indent_width)
+                            .unwrap();
+                        write!(f, "\n{}  +- ", space).unwrap();
+                        op2.fmt_with_indent(f, new_indext, max_indent_width)
+                            .unwrap();
+                        write!(f, "\n{})", space)
+                    } else {
+                        write!(f, "Binary({:?}, ...) ", btype)
+                    }
                 }
             }
         }
@@ -195,35 +209,38 @@ pub mod cc {
     use crate::alg::Op;
 
     pub fn compile(f: &Fn) {
-        // maintain a input sets
-        let mut tensors = HashMap::new();
+        // stage 1: assign tensor index to all inputs.
+        let mut input_tensors = HashMap::new();
         let mut index = 0;
         for i in f.inps() {
             println!("assigning {} for {:?}", index, i);
-            tensors.insert(i, index);
+            input_tensors.insert(i, index);
             index += 1;
         }
-
         println!("final index {}", index);
 
-        // topology sort
+        // stage 2: topology sort
+        let outs: Vec<&Rc<Op>> = top_sort(f.outs());
+        for o in &outs {
+            println!("op after sort {}", o);
+        }
+    }
+
+    fn top_sort(outs: &Vec<Rc<Op>>) -> Vec<&Rc<Op>> {
         let mut ops = Vec::new();
-        for o in f.outs() {
+        for o in outs {
             ops.push(o);
         }
 
         let mut outs = Vec::new();
         {
             let mut states = HashSet::new();
-            top_sort(&mut ops, &mut outs, &mut states);
+            top_sort_helper(&mut ops, &mut outs, &mut states);
         }
-
-        for o in &outs {
-            println!("op after sort {}", o);
-        }
+        outs
     }
 
-    fn top_sort<'a>(
+    fn top_sort_helper<'a>(
         ops: &mut Vec<&'a Rc<Op>>,
         outs: &mut Vec<&'a Rc<Op>>,
         states: &mut HashSet<&'a Rc<Op>>,
@@ -249,9 +266,9 @@ pub mod cc {
             }
             Op::Binary(_, ref arg1, ref arg2) => {
                 ops.push(arg1);
-                top_sort(ops, outs, states);
+                top_sort_helper(ops, outs, states);
                 ops.push(arg2);
-                top_sort(ops, outs, states);
+                top_sort_helper(ops, outs, states);
                 outs.push(o);
                 states.insert(o);
             }
@@ -273,7 +290,7 @@ fn main() {
     let o = Op::minus(Op::minus(Op::inp(x.clone()), Op::inp(x)), Op::inp(y));
     let o = Op::add(o, Op::read(w));
 
-    println!("Op {}", &o);
+    println!("Op {:.100}", &o);
     f.add_out(o);
 
     f.dump();
